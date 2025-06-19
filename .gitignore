@@ -2,3 +2,7 @@ credentials.py
 .env
 qualtrics_surveys_info.csv
 tests.py
+.DS_Store
+__pycache__/
+csv_files/
+zip_files/
