@@ -1,5 +1,5 @@
 credentials.py
-credentials.py.csv
+credentials.csv
 .env
 qualtrics_surveys_info.csv
 tests.py
