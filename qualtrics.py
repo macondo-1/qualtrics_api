@@ -1,5 +1,3 @@
-#!/Users/albertoruizcajiga/python/qualtrics_api/.env/bin/python3
-
 import http.client
 import mimetypes
 import base64
