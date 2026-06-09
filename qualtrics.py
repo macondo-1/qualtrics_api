@@ -91,10 +91,9 @@ class QualtricsClient:
 
     def get_all_surveys_info(self):
         endpoint = 'surveys'
-        result = self.get_paginated(endpoint)#.json()
+        result = self.get_paginated(endpoint)
         surveys_data_list = list(result)
-        # surveys_data_list = result['result']['elements']
-        print(len(surveys_data_list))
+        return surveys_data_list
         
 
 def read_credentials():
