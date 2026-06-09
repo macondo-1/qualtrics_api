@@ -8,17 +8,96 @@ import json
 import csv
 import pandas as pd
 from pathlib import Path
+from dotenv import load_dotenv
 import zipfile
 import time
 import re
+import os
+import requests
+from functools import wraps
 
 cur_path = Path(__file__).resolve().parent
+load_dotenv(cur_path / ".env")
+
+credentials_path = cur_path.joinpath('credentials.csv')
+
+# move these paths outside the API handler
 surveys_info_file_path = 'qualtrics_surveys_info.csv'
 zip_downloads = cur_path.joinpath('zip_files')
 csv_files_dir = cur_path.joinpath('csv_files')
-projects_path = Path('/Users/albertoruizcajiga/Library/CloudStorage/GoogleDrive-beautifulday874@gmail.com/' \
-'My Drive/Information_Technology/alberto/utilities/sis_international_files/projects')
-credentials_path = cur_path.joinpath('credentials.csv')
+projects_path = Path('/Users/home/Documents/sis_international/python/utilities/sis_international_files/projects')
+
+class QualtricsClient:
+    BASE_URL = 'https://sjc1.qualtrics.com/API/v3/'
+
+    def __init__(self, base_url=BASE_URL):
+        self.base_url = base_url
+
+        self.ratelimit_remaining = None # CHECK: can we implement ratelimit for qualtrics?
+        self.bearer_token = os.environ.get('BEARER_TOKEN')
+        self.client_id = os.environ.get('CLIENT_ID')
+        self.client_secret = os.environ.get('CLIENT_SECRET')
+        self.session = requests.Session()
+        #create the Base64 encoded basic authorization string
+        auth = "{0}:{1}".format(self.client_id, self.client_secret)
+        encodedBytes=base64.b64encode(auth.encode("utf-8"))
+        authStr = str(encodedBytes, "utf-8")
+        self.session.headers.update({
+                                    'Authorization': 'Basic {0}'.format(authStr),
+                                    "Content-Type": "application/x-www-form-urlencoded"
+                                    })
+        data = 'grant_type=client_credentials&scope=manage:all'
+        self.url = 'https://sjc1.qualtrics.com/oauth2/token'
+        response = self.post(self.url, data=data)
+        response_json = response.json()
+        self.access_token = response_json['access_token']
+        self.session.headers.update({
+                                    'Authorization': 'Bearer {}'.format(self.access_token),
+                                    "Content-Type": "application/json"
+                                    })
+
+    def _request(self, method, endpoint, **kwargs):
+        # if self.ratelimit_remaining is not None and int(self.ratelimit_remaining) <= RATELIMIT_THRESHOLD:
+        #     raise RuntimeError(f"Daily rate limit nearly exhausted: {self.ratelimit_remaining} remaining")
+        
+        if endpoint.startswith("https"):
+            url = endpoint
+        else:
+            url = f"{self.base_url}/{endpoint}"
+
+        response = self.session.request(method, url, **kwargs)
+        response.raise_for_status()
+        # self.ratelimit_remaining = response.headers.get('X-Ratelimit-App-Global-Day-Remaining')
+        return response
+
+    def paginate(func) -> generator:
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            response = func(self, *args, **kwargs)
+            while True:
+                body = response.json()
+                yield from body.get("result", []).get("elements")
+                next_link = body.get("result", {}).get("nextPage")
+                if not next_link:
+                    break
+                response = self.session.get(next_link)
+        return wrapper
+
+    def get(self, endpoint) -> requests.Response:
+        return self._request("GET", endpoint)
+
+    get_paginated = paginate(get)
+
+    def post(self, endpoint, data):
+        return self._request("POST", endpoint, data=data)
+
+    def get_all_surveys_info(self):
+        endpoint = 'surveys'
+        result = self.get_paginated(endpoint)#.json()
+        surveys_data_list = list(result)
+        # surveys_data_list = result['result']['elements']
+        print(len(surveys_data_list))
+        
 
 def read_credentials():
     global credentials_path
@@ -369,7 +448,7 @@ def get_working_qualtrics_jsons():
 #     print(x.name)
 # update_jsons_with_qualtrics(working_qualtrics_jsons)
 
-if __name__ == '__main__':
+def main():
     project_numbers = input('Please provide project numbers to update separated by commas\n(Click Enter/Return to update all):')
     project_numbers = project_numbers.split(',')
     pattern = '|'.join(project_numbers)
@@ -383,3 +462,6 @@ if __name__ == '__main__':
             exit()
     update_jsons_with_qualtrics(working_qualtrics_jsons)
 
+if __name__ == '__main__':
+    handler = QualtricsClient()
+    handler.get_all_surveys_info()

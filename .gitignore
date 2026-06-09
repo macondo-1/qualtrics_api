@@ -1,9 +1,11 @@
 credentials.py
 credentials.csv
 .env
+.venv
 qualtrics_surveys_info.csv
 tests.py
 .DS_Store
 __pycache__/
 csv_files/
 zip_files/
+
