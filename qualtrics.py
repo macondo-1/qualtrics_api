@@ -19,10 +19,10 @@ load_dotenv(cur_path / ".env")
 
 credentials_path = cur_path.joinpath('credentials.csv')
 
+zip_downloads = cur_path.joinpath('files', 'zip_files')
+csv_files_dir = cur_path.joinpath('files', 'csv_files')
 # move these paths outside the API handler
 surveys_info_file_path = 'qualtrics_surveys_info.csv'
-zip_downloads = cur_path.joinpath('zip_files')
-csv_files_dir = cur_path.joinpath('csv_files')
 projects_path = Path('/Users/home/Documents/sis_international/python/utilities/sis_international_files/projects')
 
 class QualtricsClient:
@@ -89,12 +89,99 @@ class QualtricsClient:
     def post(self, endpoint, data):
         return self._request("POST", endpoint, data=data)
 
-    def get_all_surveys_info(self):
+    def get_all_surveys_info(self) -> list:
         endpoint = 'surveys'
         result = self.get_paginated(endpoint)
         surveys_data_list = list(result)
         return surveys_data_list
-        
+
+    def get_survey_metadata(self, survey_id:str):
+        endpoint = 'survey-definitions/{0}/metadata'.format(survey_id)
+        result = self.get(endpoint)
+        return result
+
+    def start_survey_answers_export(self, survey_id:str) -> str:
+        """
+        sends a POST request to start the download of a survey responses
+        returns the progress id
+        """
+
+        endpoint = 'surveys/{survey_id}/export-responses'.format(survey_id=survey_id)
+        body = "{\n  \"format\": \"csv\"\n}"
+
+        response = self.post(endpoint=endpoint, data=body).json()
+        progress_id = response['result']['progressId']
+
+        return progress_id
+
+    def get_survey_answers_export_file_id(self, survey_id:str, progress_id:str) -> str: # -> str
+        """
+        returns the file_id if available
+        """
+
+        endpoint = 'surveys/{0}/export-responses/{1}'.format(survey_id, progress_id)
+
+        response = self.get(endpoint=endpoint).json()
+
+        # CHECK: move the try block out of here
+        try:
+            file_id = response['result']['fileId']
+        except Exception as e:
+            print(e)
+            file_id = None
+
+        return file_id   
+
+    def download_zip_and_csv_files(self, survey_id:str, file_id:str) -> None:
+        """
+        Downloads the zip file of the ready-to-be-downloaded survey
+        returns the Path to the saved file
+        """
+
+        endpoint = 'surveys/{survey_id}/export-responses/{file_id}/file'.format(survey_id=survey_id, file_id=file_id)
+        data = self.get(endpoint=endpoint)
+
+        file_name = '{}_responses.zip'.format(survey_id)
+        zip_file_name = zip_downloads.joinpath(file_name)
+        with open(zip_file_name, 'wb') as f:
+            f.write(data.content)
+
+        with zipfile.ZipFile(zip_file_name, 'r') as zip_ref:
+            zip_ref.extractall(csv_files_dir)
+
+    def download_survey_answers(self, survey_id:str, ):
+        """
+        Downloads a single survey
+        This function follows the complete process:
+
+        1. start download
+        2. wait for file to be ready to download
+        3. downloads the file
+        4. saves it as a zip file in the zip_files folder
+        5. unzips file and saves it to csv_files folder
+        """
+        progress_id = self.start_survey_answers_export(survey_id=survey_id)
+
+        loop = 1
+        file_id = None
+        while not file_id:
+            print('entered loop')
+            file_id = self.get_survey_answers_export_file_id(survey_id=survey_id, progress_id=progress_id)
+            print('file_id:', file_id)
+            if file_id:
+                break
+            print('waaiting 5 seconds...')
+            time.sleep(5)
+            print('loop {} ended'.format(loop))
+            loop += 1
+
+            # So the loop is not infinite
+            if loop > 4:
+                print('Too many loops, try again later...')
+                break
+
+        self.download_zip_and_csv_files(survey_id=survey_id, file_id=file_id)
+        print('file succesfully saved!')
 
 def read_credentials():
     global credentials_path
@@ -460,5 +547,6 @@ def main():
     update_jsons_with_qualtrics(working_qualtrics_jsons)
 
 if __name__ == '__main__':
+    survey_id = 'SV_00bOwXOeW1OzVRQ'
     handler = QualtricsClient()
-    handler.get_all_surveys_info()
+    handler.download_survey_answers(survey_id)
