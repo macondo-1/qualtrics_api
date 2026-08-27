@@ -13,6 +13,8 @@ import re
 import os
 import requests
 from functools import wraps
+from urllib.parse import urlparse
+from typing import Iterator
 
 cur_path = Path(__file__).resolve().parent
 load_dotenv(cur_path / ".env")
@@ -30,6 +32,7 @@ class QualtricsClient:
 
     def __init__(self, base_url=BASE_URL):
         self.base_url = base_url
+        self._allowed_host = urlparse(base_url).netloc
 
         self.ratelimit_remaining = None # CHECK: can we implement ratelimit for qualtrics?
         self.bearer_token = os.environ.get('BEARER_TOKEN')
@@ -54,12 +57,30 @@ class QualtricsClient:
                                     "Content-Type": "application/json"
                                     })
 
+    def _check_host(self, url):
+        """
+        Raises if url's host isn't the same host as base_url.
+
+        self.session carries the OAuth bearer token as a default header,
+        so any request issued through it -- an absolute-URL endpoint or a
+        pagination `nextPage` link taken from a prior response -- attaches
+        the live credential to whatever host is requested. Checked before
+        every such use rather than trusted implicitly.
+        """
+        host = urlparse(url).netloc
+        if host != self._allowed_host:
+            raise ValueError(
+                f"Refusing to send credentialed request to unexpected host "
+                f"{host!r} (expected {self._allowed_host!r}): {url!r}"
+            )
+
     def _request(self, method, endpoint, **kwargs):
         # if self.ratelimit_remaining is not None and int(self.ratelimit_remaining) <= RATELIMIT_THRESHOLD:
         #     raise RuntimeError(f"Daily rate limit nearly exhausted: {self.ratelimit_remaining} remaining")
-        
+
         if endpoint.startswith("https"):
             url = endpoint
+            self._check_host(url)
         else:
             url = f"{self.base_url}/{endpoint}"
 
@@ -68,7 +89,7 @@ class QualtricsClient:
         # self.ratelimit_remaining = response.headers.get('X-Ratelimit-App-Global-Day-Remaining')
         return response
 
-    def paginate(func) -> generator:
+    def paginate(func) -> Iterator[dict]:
         @wraps(func)
         def wrapper(self, *args, **kwargs):
             response = func(self, *args, **kwargs)
@@ -78,6 +99,7 @@ class QualtricsClient:
                 next_link = body.get("result", {}).get("nextPage")
                 if not next_link:
                     break
+                self._check_host(next_link)
                 response = self.session.get(next_link)
         return wrapper
 
